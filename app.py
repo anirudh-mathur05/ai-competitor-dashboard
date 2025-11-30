@@ -33,6 +33,50 @@ discover_btn = st.sidebar.button("Discover Competitors")
 import re
 
 def extract_json(text):
+
+discovered_competitors = []
+
+if discover_btn and company_input.strip():
+    with st.sidebar:
+        st.write("🔍 Discovering competitors…")
+
+    prompt = f"""
+    You are an AI market analyst.
+    Given the company name: {company_input}
+
+    Return ONLY JSON in this format:
+    {{
+      "competitors": [
+        {{"name": "Adyen", "url": "https://adyen.com"}},
+        {{"name": "PayPal", "url": "https://paypal.com"}}
+      ]
+    }}
+
+    Rules:
+    - 4 to 8 direct competitors.
+    - Official websites ONLY.
+    - Absolutely no commentary.
+    """
+
+    try:
+        from backend.llm_client import call_llama
+        llm_raw = call_llama(prompt)
+
+        parsed = None
+        if isinstance(llm_raw, dict):
+            parsed = llm_raw
+        else:
+            parsed = extract_json(str(llm_raw))
+
+        if parsed and "competitors" in parsed:
+            discovered_competitors = parsed["competitors"]
+            st.sidebar.success(f"Found {len(discovered_competitors)} competitors.")
+        else:
+            st.sidebar.error("AI returned no competitors.")
+    except Exception as e:
+        st.sidebar.error(f"AI error: {str(e)}")
+
+    
     """Safely extract JSON from LLM output."""
     match = re.search(r"\{.*\}", text, re.DOTALL)
     if match:
