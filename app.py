@@ -24,6 +24,26 @@ def save_data(data):
 data = load_data()
 
 # -------------------------------
+# Sidebar: AI Competitor Discovery
+# -------------------------------
+st.sidebar.header("Find Competitors (AI)")
+company_input = st.sidebar.text_input("Enter a company name")
+discover_btn = st.sidebar.button("Discover Competitors")
+
+import re
+
+def extract_json(text):
+    """Safely extract JSON from LLM output."""
+    match = re.search(r"\{.*\}", text, re.DOTALL)
+    if match:
+        try:
+            return json.loads(match.group(0))
+        except:
+            return None
+    return None
+
+
+# -------------------------------
 # Sidebar: Input competitor URL
 # -------------------------------
 st.sidebar.header("Add Competitor")
