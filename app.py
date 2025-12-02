@@ -104,6 +104,7 @@ else:
             return None
     return None
 
+discovered_competitors = []
 
 # -------------------------------
 # Sidebar: Input competitor URL
