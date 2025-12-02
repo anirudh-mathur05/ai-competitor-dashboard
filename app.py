@@ -76,6 +76,24 @@ if discover_btn and company_input.strip():
     except Exception as e:
         st.sidebar.error(f"AI error: {str(e)}")
 
+# -------------------------------
+# Competitor Selection UI
+# -------------------------------
+if discovered_competitors:
+    st.sidebar.subheader("Select competitors to analyze")
+    competitor_names = [
+        f"{c.get('name', 'Unknown')} ({c.get('url', '')})"
+        for c in discovered_competitors
+    ]
+    selected_competitors_ai = st.sidebar.multiselect(
+        "Choose competitors",
+        competitor_names,
+        default=competitor_names
+    )
+else:
+    selected_competitors_ai = []
+
+
     
     """Safely extract JSON from LLM output."""
     match = re.search(r"\{.*\}", text, re.DOTALL)
