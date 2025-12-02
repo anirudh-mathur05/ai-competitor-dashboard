@@ -3,6 +3,7 @@ import requests
 import json
 import os
 import pandas as pd
+import re
 
 st.set_page_config(page_title="AI Competitor Battlecard Dashboard", layout="wide")
 
@@ -30,8 +31,6 @@ st.sidebar.header("Find Competitors (AI)")
 company_input = st.sidebar.text_input("Enter a company name")
 discover_btn = st.sidebar.button("Discover Competitors")
 
-import re
-
 def extract_json(text):
     """Safely extract JSON from LLM output."""
     match = re.search(r"\{.*\}", text, re.DOTALL)
@@ -45,8 +44,8 @@ def extract_json(text):
 discovered_competitors = []
 
 if discover_btn and company_input.strip():
-    with st.sidebar:
-        st.write("🔍 Discovering competitors…")
+
+    st.sidebar.write("🔍 Discovering competitors…")
 
     prompt = f"""
     You are an AI market analyst.
@@ -67,20 +66,22 @@ if discover_btn and company_input.strip():
     """
 
     try:
-        from backend.llm_client import call_llama
-        llm_raw = call_llama(prompt)
+        # Backend LLM endpoint (no python imports)
+        resp = requests.post(
+            "http://localhost:8000/llm",
+            json={"prompt": prompt},
+            timeout=30
+        )
+        llm_raw = resp.json().get("response", "")
 
-        parsed = None
-        if isinstance(llm_raw, dict):
-            parsed = llm_raw
-        else:
-            parsed = extract_json(str(llm_raw))
+        parsed = extract_json(llm_raw)
 
         if parsed and "competitors" in parsed:
             discovered_competitors = parsed["competitors"]
             st.sidebar.success(f"Found {len(discovered_competitors)} competitors.")
         else:
             st.sidebar.error("AI returned no competitors.")
+
     except Exception as e:
         st.sidebar.error(f"AI error: {str(e)}")
 
@@ -101,10 +102,8 @@ if discovered_competitors:
 else:
     selected_competitors_ai = []
 
-
-
 # -------------------------------
-# Sidebar: Input competitor URL
+# Sidebar: Add Competitor
 # -------------------------------
 st.sidebar.header("Add Competitor")
 url_input = st.sidebar.text_input("Enter competitor URL (https://...)")
@@ -114,37 +113,31 @@ if st.sidebar.button("Analyze"):
         try:
             resp = requests.post(
                 "http://localhost:8000/analyze_competitor",
-                json={"url": url_input}
+                json={"url": url_input},
+                timeout=30
             )
             result = resp.json()
 
-            # Normalize competitor name
-            name = result.get("url", "").replace("https://", "").replace("http://", "").split("/")[0]
-            name = name.replace("www.", "")
-            name = name.split(".")[0].capitalize()
+            name = result.get("url", "").replace("https://", "").replace("http://", "")
+            name = name.replace("www.", "").split("/")[0].split(".")[0].capitalize()
 
             data[name] = result
             save_data(data)
-
             st.sidebar.success(f"Added: {name}")
         except Exception as e:
             st.sidebar.error(f"Error: {str(e)}")
-
-# -------------------------------
-# Sidebar: Competitor selection
-# -------------------------------
-st.sidebar.header("Compare Competitors")
-competitors = list(data.keys())
-selected = st.sidebar.multiselect("Select competitors", competitors, default=competitors)
 
 # -------------------------------
 # Main UI
 # -------------------------------
 st.title("AI Competitor Battlecard Dashboard")
 
+st.sidebar.header("Compare Competitors")
+competitors = list(data.keys())
+selected = st.sidebar.multiselect("Select competitors", competitors, default=competitors)
+
 if not selected:
     st.info("Select at least one competitor from the left sidebar.")
-
 
 # -------------------------------
 # Comparison Table
@@ -152,7 +145,6 @@ if not selected:
 if selected:
     st.subheader("Side-by-Side Comparison")
 
-    # Prepare matrix (rows = attributes, columns = competitors)
     attributes = [
         "product_summary",
         "target_users",
@@ -168,20 +160,17 @@ if selected:
         row = []
         for comp in selected:
             val = data.get(comp, {}).get(attr, "")
-
-            # Convert lists to bullet points
             if isinstance(val, list):
                 val = "• " + "\n• ".join(val) if val else ""
-
             row.append(val)
+
         table[attr.replace("_", " ").title()] = row
 
     df = pd.DataFrame(table, index=selected).T
-
     st.dataframe(df, use_container_width=True)
 
 # -------------------------------
-# Optional: Styling Enhancements
+# Styled Comparison
 # -------------------------------
 def colorize(val, attr):
     if not isinstance(val, str):
@@ -199,7 +188,8 @@ if selected:
     for attr in attributes:
         col = attr.replace("_", " ").title()
         styled_df.loc[col] = [
-            colorize(styled_df.loc[col][comp], attr) for comp in selected
+            colorize(styled_df.loc[col][comp], attr)
+            for comp in selected
         ]
 
     st.subheader("Styled Comparison")
