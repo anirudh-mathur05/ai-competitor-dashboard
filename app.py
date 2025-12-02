@@ -103,7 +103,7 @@ else:
         except:
             return None
     return None
-
+    
 discovered_competitors = []
 
 # -------------------------------
