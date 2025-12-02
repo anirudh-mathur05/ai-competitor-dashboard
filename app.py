@@ -33,6 +33,14 @@ discover_btn = st.sidebar.button("Discover Competitors")
 import re
 
 def extract_json(text):
+    """Safely extract JSON from LLM output."""
+    match = re.search(r"\{.*\}", text, re.DOTALL)
+    if match:
+        try:
+            return json.loads(match.group(0))
+        except:
+            return None
+    return None
 
 discovered_competitors = []
 
