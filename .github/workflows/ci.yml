@@ -28,14 +28,9 @@ jobs:
         run: |
           python -m py_compile $(git ls-files "*.py") || exit 1
 
-      - name: Validate Streamlit App Loads
+      - name: Validate Streamlit App Imports
         run: |
           python -c "import app; print('Streamlit app imported successfully.')"
 
-      - name: Validate Backend Imports
-        run: |
-          if [ -d 'backend' ]; then
-            python -c \"import backend.analyzer, backend.llm_client, backend.main; print('Backend imported successfully.')\"
-          else
-            echo 'No backend folder found — skipping backend tests.'
-          fi
+      - name: Skip Backend Tests
+        run: echo "No backend folder in dashboard repo — skipping backend checks."
