@@ -32,14 +32,6 @@ jobs:
         run: |
           python -c "import app; print('Streamlit app imported successfully.')"
 
-      - name: Validate Backend Imports
+      - name: Skip Backend Tests (Backend not part of this repo)
         run: |
-          if [ -d "backend" ]; then
-            echo "import backend.analyzer" > test_backend.py
-            echo "import backend.llm_client" >> test_backend.py
-            echo "import backend.main" >> test_backend.py
-            echo "print('Backend imported successfully.')" >> test_backend.py
-            python test_backend.py
-          else
-            echo "No backend folder found — skipping backend tests."
-          fi
+          echo "Backend folder not included in dashboard repo — skipping backend tests."
