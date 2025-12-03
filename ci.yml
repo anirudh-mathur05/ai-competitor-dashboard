@@ -38,6 +38,7 @@ PYEOF
       - name: Validate Backend Imports
         run: |
           if [ -d "backend" ]; then
+            echo "Backend folder found — importing modules..."
             python - << 'PYEOF'
 import backend.analyzer
 import backend.llm_client
