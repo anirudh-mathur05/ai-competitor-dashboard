@@ -30,21 +30,12 @@ jobs:
 
       - name: Validate Streamlit App Loads
         run: |
-          python - << 'PYEOF'
-import app
-print("Streamlit app imported successfully.")
-PYEOF
+          python -c "import app; print('Streamlit app imported successfully.')"
 
       - name: Validate Backend Imports
         run: |
           if [ -d "backend" ]; then
-            echo "Backend folder found — importing modules..."
-            python - << 'PYEOF'
-import backend.analyzer
-import backend.llm_client
-import backend.main
-print("Backend imported successfully.")
-PYEOF
+            python -c "import backend.analyzer, backend.llm_client, backend.main; print('Backend imported successfully.')"
           else
-            echo "No backend folder found — skipping backend tests."
+            echo 'No backend folder found — skipping backend tests.'
           fi
