@@ -104,3 +104,46 @@ class Analyzer:
             raise RuntimeError("Invalid LLM JSON for competitor analysis.")
 
         return result.json
+
+    async def validate_company(self, url: str):
+        """
+        Scrape company page -> summarize -> validate category match using LLM.
+        """
+        root_cat = self.state.get("root_category")
+        if not root_cat:
+            raise RuntimeError("Root category not set. Run /infer_category first.")
+
+        # SCRAPE
+        try:
+            r = httpx.get(url, timeout=10)
+            text = r.text
+        except Exception:
+            text = ""
+
+        # Summarize content for validation
+        snippet = text[:2000] if text else f"Website not accessible: {url}"
+
+        # Build validation prompt
+        prompt = f"""
+You are a category validator.
+
+ROOT CATEGORY: {root_cat}
+
+COMPANY TEXT:
+{snippet}
+
+Determine if this company belongs to the ROOT CATEGORY.
+
+Return ONLY JSON:
+{{
+  "allowed": true/false,
+  "reason": "very short explanation"
+}}
+"""
+
+        llm_result = await self.llm.call_llm(prompt)
+
+        if not llm_result.json:
+            raise RuntimeError("Invalid LLM JSON response for competitor validation.")
+
+        return llm_result.json
