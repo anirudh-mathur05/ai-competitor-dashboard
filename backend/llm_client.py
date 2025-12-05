@@ -38,9 +38,9 @@ class LLMClient:
 
             text = response.json()["choices"][0]["message"]["content"]
             # DEBUG LOG: print full raw response from Groq
-                print("\n\n================ RAW LLM RESPONSE ================\n")
-                print(text)
-                print("\n=================================================\n")
+            print("\n\n================ RAW LLM RESPONSE ================\n")
+            print(text)
+            print("\n=================================================\n")
 
             # Attempt JSON parsing
             import json
