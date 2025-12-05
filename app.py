@@ -1,196 +1,181 @@
 import streamlit as st
 import requests
-import json
-import os
-import pandas as pd
-import re
+import socket
 
-st.set_page_config(page_title="AI Competitor Battlecard Dashboard", layout="wide")
+st.set_page_config(page_title="AI Competitor Battlecard Agent", layout="wide")
 
-# -------------------------------
-# Load / Save Local Battlecards
-# -------------------------------
-DATA_FILE = "battlecards.json"
+# ---------------------------------------------------------
+# AUTO-DETECT BACKEND URL (Docker vs Local)
+# ---------------------------------------------------------
+hostname = socket.gethostname().lower()
 
-def load_data():
-    if not os.path.exists(DATA_FILE):
-        return {}
-    with open(DATA_FILE, "r") as f:
-        return json.load(f)
-
-def save_data(data):
-    with open(DATA_FILE, "w") as f:
-        json.dump(data, f, indent=2)
-
-data = load_data()
-
-# -------------------------------
-# Sidebar: AI Competitor Discovery
-# -------------------------------
-st.sidebar.header("Find Competitors (AI)")
-company_input = st.sidebar.text_input("Enter a company name")
-discover_btn = st.sidebar.button("Discover Competitors")
-
-def extract_json(text):
-    """Safely extract JSON from LLM output."""
-    match = re.search(r"\{.*\}", text, re.DOTALL)
-    if match:
-        try:
-            return json.loads(match.group(0))
-        except:
-            return None
-    return None
-
-discovered_competitors = []
-
-if discover_btn and company_input.strip():
-
-    st.sidebar.write("🔍 Discovering competitors…")
-
-    prompt = f"""
-    You are an AI market analyst.
-    Given the company name: {company_input}
-
-    Return ONLY JSON in this format:
-    {{
-      "competitors": [
-        {{"name": "Adyen", "url": "https://adyen.com"}},
-        {{"name": "PayPal", "url": "https://paypal.com"}}
-      ]
-    }}
-
-    Rules:
-    - 4 to 8 direct competitors.
-    - Official websites ONLY.
-    - Absolutely no commentary.
-    """
-
-    try:
-        # Backend LLM endpoint (no python imports)
-        resp = requests.post(
-            "http://localhost:8000/llm",
-            json={"prompt": prompt},
-            timeout=30
-        )
-        llm_raw = resp.json().get("response", "")
-
-        parsed = extract_json(llm_raw)
-
-        if parsed and "competitors" in parsed:
-            discovered_competitors = parsed["competitors"]
-            st.sidebar.success(f"Found {len(discovered_competitors)} competitors.")
-        else:
-            st.sidebar.error("AI returned no competitors.")
-
-    except Exception as e:
-        st.sidebar.error(f"AI error: {str(e)}")
-
-# -------------------------------
-# Competitor Selection UI
-# -------------------------------
-if discovered_competitors:
-    st.sidebar.subheader("Select competitors to analyze")
-    competitor_names = [
-        f"{c.get('name', 'Unknown')} ({c.get('url', '')})"
-        for c in discovered_competitors
-    ]
-    selected_competitors_ai = st.sidebar.multiselect(
-        "Choose competitors",
-        competitor_names,
-        default=competitor_names
-    )
+if "competitor-frontend" in hostname or "docker" in hostname:
+    BASE_URL = "http://backend:8000"
 else:
-    selected_competitors_ai = []
+    BASE_URL = "http://localhost:8000"
 
-# -------------------------------
-# Sidebar: Add Competitor
-# -------------------------------
-st.sidebar.header("Add Competitor")
-url_input = st.sidebar.text_input("Enter competitor URL (https://...)")
+# ---------------------------------------------------------
+# STREAMLIT STATE SETUP
+# ---------------------------------------------------------
+if "root_company" not in st.session_state:
+    st.session_state.root_company = None
 
-if st.sidebar.button("Analyze"):
-    if url_input.strip():
+if "root_category" not in st.session_state:
+    st.session_state.root_category = None
+
+if "root_industry" not in st.session_state:
+    st.session_state.root_industry = None
+
+if "root_keywords" not in st.session_state:
+    st.session_state.root_keywords = []
+
+if "competitors" not in st.session_state:
+    st.session_state.competitors = []  # list of {"name":..., "url":...}
+
+if "battlecards" not in st.session_state:
+    st.session_state.battlecards = {}  # keyed by domain
+
+
+# ---------------------------------------------------------
+# SIDEBAR UI
+# ---------------------------------------------------------
+with st.sidebar:
+    st.header("⚙️ App State")
+
+    st.write("**Backend URL:**", BASE_URL)
+
+    st.write("### Root Company")
+    st.write(st.session_state.root_company)
+
+    st.write("### Category")
+    st.write(st.session_state.root_category)
+
+    st.write("### Competitors")
+    if st.session_state.competitors:
+        for c in st.session_state.competitors:
+            st.write(f"- {c['name']} ({c['url']})")
+    else:
+        st.write("No competitors yet.")
+
+
+# ---------------------------------------------------------
+# MAIN UI: STEP 1 — Infer Category
+# ---------------------------------------------------------
+st.title("🧠 AI Competitor Battlecard Agent")
+
+st.subheader("Step 1 — Enter Primary Company URL")
+
+primary_url = st.text_input(
+    "Company URL",
+    placeholder="https://stripe.com",
+)
+
+if st.button("Infer Category"):
+    if not primary_url.strip():
+        st.error("Please enter a valid URL.")
+    else:
         try:
             resp = requests.post(
-                "http://localhost:8000/analyze_competitor",
-                json={"url": url_input},
-                timeout=30
+                f"{BASE_URL}/infer_category",
+                json={"url": primary_url},
+                timeout=30,
             )
-            result = resp.json()
+            if resp.status_code == 200:
+                data = resp.json()
 
-            name = result.get("url", "").replace("https://", "").replace("http://", "")
-            name = name.replace("www.", "").split("/")[0].split(".")[0].capitalize()
+                st.session_state.root_company = primary_url
+                st.session_state.root_category = data["state"]["root_category"]
+                st.session_state.root_industry = data["state"]["root_industry"]
+                st.session_state.root_keywords = data["state"]["root_keywords"]
 
-            data[name] = result
-            save_data(data)
-            st.sidebar.success(f"Added: {name}")
+                st.success("Category inferred successfully!")
+                st.experimental_rerun()
+
+            else:
+                st.error(f"Error: {resp.text}")
+
         except Exception as e:
-            st.sidebar.error(f"Error: {str(e)}")
+            st.error(f"Request failed: {e}")
 
-# -------------------------------
-# Main UI
-# -------------------------------
-st.title("AI Competitor Battlecard Dashboard")
 
-st.sidebar.header("Compare Competitors")
-competitors = list(data.keys())
-selected = st.sidebar.multiselect("Select competitors", competitors, default=competitors)
+# ---------------------------------------------------------
+# If category not set → stop here
+# ---------------------------------------------------------
+if not st.session_state.root_category:
+    st.stop()
 
-if not selected:
-    st.info("Select at least one competitor from the left sidebar.")
 
-# -------------------------------
-# Comparison Table
-# -------------------------------
-if selected:
-    st.subheader("Side-by-Side Comparison")
+# ---------------------------------------------------------
+# MAIN UI: STEP 2 — Manual Competitor Validation
+# ---------------------------------------------------------
+st.subheader("Step 2 — Add Competitors (Validated by AI)")
 
-    attributes = [
-        "product_summary",
-        "target_users",
-        "key_features",
-        "strengths",
-        "weaknesses",
-        "ai_usage",
-        "differentiators",
-    ]
+competitor_url = st.text_input(
+    "Competitor URL",
+    placeholder="https://example.com",
+    key="competitor_url_input",
+)
 
-    table = {}
-    for attr in attributes:
-        row = []
-        for comp in selected:
-            val = data.get(comp, {}).get(attr, "")
-            if isinstance(val, list):
-                val = "• " + "\n• ".join(val) if val else ""
-            row.append(val)
+if st.button("Validate & Add Competitor"):
+    if not competitor_url.strip():
+        st.error("Please enter a URL.")
+    else:
+        try:
+            resp = requests.post(
+                f"{BASE_URL}/validate_company",
+                json={
+                    "url": competitor_url,
+                    "category": st.session_state.root_category,
+                },
+                timeout=30,
+            )
+            data = resp.json()
 
-        table[attr.replace("_", " ").title()] = row
+            if data.get("allowed"):
+                st.session_state.competitors.append(
+                    {"name": data["name"], "url": competitor_url}
+                )
+                st.success(f"Added competitor: {data['name']}")
+                st.experimental_rerun()
+            else:
+                st.error(f"Rejected: {data.get('reason')}")
 
-    df = pd.DataFrame(table, index=selected).T
-    st.dataframe(df, use_container_width=True)
+        except Exception as e:
+            st.error(f"Request failed: {e}")
 
-# -------------------------------
-# Styled Comparison
-# -------------------------------
-def colorize(val, attr):
-    if not isinstance(val, str):
-        return val
-    if attr == "strengths" and val.strip():
-        return f"🟩 {val}"
-    if attr == "weaknesses" and val.strip():
-        return f"🟥 {val}"
-    if attr == "differentiators" and val.strip():
-        return f"🟪 {val}"
-    return val
 
-if selected:
-    styled_df = df.copy()
-    for attr in attributes:
-        col = attr.replace("_", " ").title()
-        styled_df.loc[col] = [
-            colorize(styled_df.loc[col][comp], attr)
-            for comp in selected
-        ]
+# ---------------------------------------------------------
+# MAIN UI: STEP 3 — Analyze Competitors
+# ---------------------------------------------------------
+st.subheader("Step 3 — Analyze Competitors")
 
-    st.subheader("Styled Comparison")
-    st.dataframe(styled_df, use_container_width=True)
+for c in st.session_state.competitors:
+    if st.button(f"Analyze {c['name']}"):
+        try:
+            resp = requests.post(
+                f"{BASE_URL}/analyze_competitor",
+                json={"url": c["url"]},
+                timeout=60,
+            )
+            if resp.status_code == 200:
+                st.session_state.battlecards[c["url"]] = resp.json()
+                st.success(f"Battlecard ready for {c['name']}")
+            else:
+                st.error(f"Error: {resp.text}")
+
+        except Exception as e:
+            st.error(f"Request failed: {e}")
+
+
+# ---------------------------------------------------------
+# MAIN UI: STEP 4 — Show Comparison Table
+# ---------------------------------------------------------
+st.subheader("Step 4 — Comparison Table")
+
+if st.session_state.battlecards:
+    for url, bc in st.session_state.battlecards.items():
+        st.write(f"### {url}")
+        st.json(bc)  # placeholder — we will style this next
+
+else:
+    st.info("No battlecards yet.")
