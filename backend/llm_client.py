@@ -37,6 +37,8 @@ class LLMClient:
                 response.raise_for_status()
 
             text = response.json()["choices"][0]["message"]["content"]
+            print("\n\n================ RAW LLM RESPONSE ================\n", text, "\n=================================================\n\n")
+
 
             # Attempt JSON parsing
             import json
