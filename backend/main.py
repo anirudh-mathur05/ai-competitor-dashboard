@@ -66,3 +66,15 @@ async def analyze_competitor(payload: URLRequest):
         return result
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/validate_company")
+async def validate_company(payload: dict):
+    url = payload.get("url")
+    if not url:
+        raise HTTPException(status_code=400, detail="Missing 'url' in request body")
+
+    try:
+        result = await analyzer.validate_company(url)
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
