@@ -10,29 +10,34 @@ app = FastAPI(
 
 analyzer = Analyzer()
 
-# --------------------
-# Request Models
-# --------------------
 
+# ----------------------------
+# Request Models
+# ----------------------------
 class InferPayload(BaseModel):
     url: str
+
 
 class ValidatePayload(BaseModel):
     url: str
 
 
-# --------------------
-# Root Category Setter
-# --------------------
-# UI owns category selection.
+class AnalyzePayload(BaseModel):
+    url: str
+
+
 class CategoryPayload(BaseModel):
     category: str
 
+
+# ----------------------------
+# Set Category (UI-Owned)
+# ----------------------------
 @app.post("/set_category")
 async def set_category(payload: CategoryPayload):
     """
-    User manually selects category from UI.
-    This value controls competitor validation.
+    User selects the root category in the UI.
+    Backend uses this for validation.
     """
     STATE["root_category"] = payload.category
     return {
@@ -41,15 +46,18 @@ async def set_category(payload: CategoryPayload):
     }
 
 
-# --------------------
-# Infer Category (Advisory)
-# --------------------
+# ----------------------------
+# Infer Category (Advisory Only)
+# ----------------------------
 @app.post("/infer_category")
 async def infer_category(payload: InferPayload):
     """
-    Analyze root company:
-    - DOES NOT overwrite root_category (which UI selected).
-    - Enriches industry + keywords + suggested category.
+    Uses LLM to enrich:
+    - industry
+    - keywords
+    - suggested category (advisory only)
+
+    Does NOT overwrite root_category.
     """
     try:
         result = await analyzer.infer_category(payload.url)
@@ -58,13 +66,13 @@ async def infer_category(payload: InferPayload):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-# --------------------
+# ----------------------------
 # Validate Competitor
-# --------------------
+# ----------------------------
 @app.post("/validate_company")
 async def validate_company(payload: ValidatePayload):
     """
-    Validates if a competitor belongs in the chosen root_category.
+    Allows adding a manual competitor only if it matches root_category.
     """
     try:
         result = await analyzer.validate_company(payload.url)
@@ -73,28 +81,23 @@ async def validate_company(payload: ValidatePayload):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-# --------------------
+# ----------------------------
 # Analyze Competitor (Battlecard)
-# --------------------
-class AnalyzePayload(BaseModel):
-    url: str
-
+# ----------------------------
 @app.post("/analyze_competitor")
 async def analyze_competitor(payload: AnalyzePayload):
     """
-    Only allowed if:
-    - root_category is set
-    - competitor passes validate_company beforehand
+    Generates a battlecard for a competitor.
+    Only valid if root_category is set.
     """
+
     if not STATE["root_category"]:
         raise HTTPException(
             status_code=400,
-            detail="root_category not set. User must set category before analysis."
+            detail="root_category not set. Call /set_category first."
         )
 
-    # Optional: block unvalidated companies (future strict mode)
-    # For now: allow analysis directly.
-
+    # NOTE: Strict validation check can be enforced later.
     try:
         result = await analyzer.analyze_competitor(payload.url)
         return result
@@ -102,9 +105,12 @@ async def analyze_competitor(payload: AnalyzePayload):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-# --------------------
+# ----------------------------
 # Health Check
-# --------------------
+# ----------------------------
 @app.get("/health")
 async def health():
-    return {"status": "ok", "category": STATE["root_category"]}
+    return {
+        "status": "ok",
+        "root_category": STATE["root_category"]
+    }
