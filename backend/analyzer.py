@@ -11,7 +11,47 @@ class Analyzer:
             "root_industry": None,
         }
 
-    async def infer_category(self, url: str) -> dict:
+async def infer_category(self, url: str):
+    """
+    Scrape the root company and retrieve industry + keywords + LLM-suggested category.
+    DOES NOT overwrite the user-selected root_category.
+    """
+
+    text = await self.scrape_website(url)
+
+    prompt = f"""
+    Analyze the company described below and return JSON with fields:
+    - industry: High-level industry, e.g. "Financial Technology"
+    - category: Suggested category (advisory only)
+    - keywords: List of relevant product/market keywords
+
+    COMPANY TEXT:
+    {text}
+
+    Return JSON only.
+    """
+
+    llm_response = await self.llm.call_llm(prompt)
+
+    if not llm_response.json:
+        raise RuntimeError("Invalid JSON returned by LLM in /infer_category")
+
+    industry = llm_response.json.get("industry")
+    category_suggested = llm_response.json.get("category")
+    keywords = llm_response.json.get("keywords", [])
+
+    # Update backend state — note: root_category is NOT touched here
+    STATE["root_company"] = url
+    STATE["root_industry"] = industry
+    STATE["root_keywords"] = keywords
+
+    return {
+        "root_company": url,
+        "root_category": STATE["root_category"],           # the UI-selected category (unchanged)
+        "llm_suggested_category": category_suggested,     # advisory only
+        "root_industry": industry,
+        "root_keywords": keywords,
+    }
         """
         Extract industry, category, and keywords for the primary company.
         Updates backend STATE.
