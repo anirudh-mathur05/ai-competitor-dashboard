@@ -18,7 +18,17 @@ class URLRequest(BaseModel):
 # -------------------------------
 
 @app.post("/infer_category")
-async def infer_category(payload: URLRequest):
+async def infer_category(payload: InferPayload):
+    """
+    Enrich the root company using LLM analysis.
+    root_category (user-chosen) is NOT overwritten.
+    """
+    try:
+        result = await analyzer.infer_category(payload.url)
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
     """
     Step 1: User provides the PRIMARY company URL.
     Backend infers:
