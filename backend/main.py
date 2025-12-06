@@ -1,27 +1,55 @@
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from .analyzer import Analyzer
+from .state import STATE
 
-app = FastAPI(title="AI Competitor Battlecard Agent")
+app = FastAPI(
+    title="AI Competitor Battlecard Backend",
+    version="2.0"
+)
+
 analyzer = Analyzer()
 
+# --------------------
+# Request Models
+# --------------------
 
-# -------------------------------
-# Request Model
-# -------------------------------
-class URLRequest(BaseModel):
+class InferPayload(BaseModel):
+    url: str
+
+class ValidatePayload(BaseModel):
     url: str
 
 
-# -------------------------------
-# Endpoints
-# -------------------------------
+# --------------------
+# Root Category Setter
+# --------------------
+# UI owns category selection.
+class CategoryPayload(BaseModel):
+    category: str
 
+@app.post("/set_category")
+async def set_category(payload: CategoryPayload):
+    """
+    User manually selects category from UI.
+    This value controls competitor validation.
+    """
+    STATE["root_category"] = payload.category
+    return {
+        "root_category": STATE["root_category"],
+        "message": "Category set successfully."
+    }
+
+
+# --------------------
+# Infer Category (Advisory)
+# --------------------
 @app.post("/infer_category")
 async def infer_category(payload: InferPayload):
     """
-    Enrich the root company using LLM analysis.
-    root_category (user-chosen) is NOT overwritten.
+    Analyze root company:
+    - DOES NOT overwrite root_category (which UI selected).
+    - Enriches industry + keywords + suggested category.
     """
     try:
         result = await analyzer.infer_category(payload.url)
@@ -29,28 +57,14 @@ async def infer_category(payload: InferPayload):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-    """
-    Step 1: User provides the PRIMARY company URL.
-    Backend infers:
-    - industry
-    - category (root category)
-    - keywords
 
-    Updates backend memory STATE.
-    """
-    try:
-        result = await analyzer.infer_category(payload.url)
-        return {"status": "ok", "data": result, "state": analyzer.STATE}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
+# --------------------
+# Validate Competitor
+# --------------------
 @app.post("/validate_company")
-async def validate_company(payload: URLRequest):
+async def validate_company(payload: ValidatePayload):
     """
-    Step 2 (manual competitor addition):
-    Company is allowed ONLY if it belongs to the same inferred category.
-    Strict Option-A behavior.
+    Validates if a competitor belongs in the chosen root_category.
     """
     try:
         result = await analyzer.validate_company(payload.url)
@@ -59,17 +73,27 @@ async def validate_company(payload: URLRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+# --------------------
+# Analyze Competitor (Battlecard)
+# --------------------
+class AnalyzePayload(BaseModel):
+    url: str
+
 @app.post("/analyze_competitor")
-async def analyze_competitor(payload: URLRequest):
+async def analyze_competitor(payload: AnalyzePayload):
     """
-    Step 3: Full battlecard generation.
-    Only permitted once root category is set.
+    Only allowed if:
+    - root_category is set
+    - competitor passes validate_company beforehand
     """
-    if analyzer.STATE["root_category"] is None:
+    if not STATE["root_category"]:
         raise HTTPException(
             status_code=400,
-            detail="Root category not set. Run /infer_category first."
+            detail="root_category not set. User must set category before analysis."
         )
+
+    # Optional: block unvalidated companies (future strict mode)
+    # For now: allow analysis directly.
 
     try:
         result = await analyzer.analyze_competitor(payload.url)
@@ -77,14 +101,10 @@ async def analyze_competitor(payload: URLRequest):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.post("/validate_company")
-async def validate_company(payload: dict):
-    url = payload.get("url")
-    if not url:
-        raise HTTPException(status_code=400, detail="Missing 'url' in request body")
 
-    try:
-        result = await analyzer.validate_company(url)
-        return result
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+# --------------------
+# Health Check
+# --------------------
+@app.get("/health")
+async def health():
+    return {"status": "ok", "category": STATE["root_category"]}
