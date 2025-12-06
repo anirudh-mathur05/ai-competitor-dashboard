@@ -21,7 +21,7 @@ class Analyzer:
 
         soup = BeautifulSoup(resp.text, "html.parser")
         text = soup.get_text(separator=" ", strip=True)
-        return text[:6000]  # LLM-safe chunk
+        return text[:6000]  # Limit for LLM safety
 
     async def infer_category(self, url: str):
         """
@@ -30,7 +30,7 @@ class Analyzer:
         - keywords
         - LLM-suggested category (advisory only)
 
-        DOES NOT overwrite root_category (UI-owned).
+        DOES NOT overwrite root_category (controlled by UI).
         """
 
         text = await self.scrape_website(url)
@@ -63,5 +63,44 @@ class Analyzer:
 
         return {
             "root_company": url,
-            "root_category": STATE["root_category"],   # user-chosen category
-            "llm_suggested_category": category_sugges_
+            "root_category": STATE["root_category"],
+            "llm_suggested_category": category_suggested,
+            "root_industry": industry,
+            "root_keywords": keywords
+        }
+
+    async def validate_company(self, url: str):
+        """
+        Validate if a competitor belongs to the chosen category.
+        """
+
+        if not STATE["root_category"]:
+            raise RuntimeError(
+                "root_category not set. User must select category first."
+            )
+
+        text = await self.scrape_website(url)
+
+        prompt = f"""
+        You are a strict industry validator.
+
+        ROOT CATEGORY (human-chosen):
+        "{STATE['root_category']}"
+
+        COMPANY TEXT:
+        {text}
+
+        Your job:
+        - Determine if the company clearly offers products/services in the ROOT CATEGORY.
+        - If YES: return {{"allowed": true, "reason": "..."}}
+        - If NO or uncertain: return {{"allowed": false, "reason": "..."}}
+
+        Return JSON only.
+        """
+
+        llm_response = await self.llm.call_llm(prompt)
+
+        if not llm_response.json:
+            raise RuntimeError("Invalid JSON returned by LLM in /validate_company")
+
+        return llm_response.json
