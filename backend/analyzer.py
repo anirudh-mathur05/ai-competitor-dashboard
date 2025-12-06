@@ -1,189 +1,67 @@
+import httpx
+from bs4 import BeautifulSoup
 from .llm_client import LLMClient
+from .state import STATE
 
 
 class Analyzer:
     def __init__(self):
         self.llm = LLMClient()
-        self.STATE = {
-            "root_company": None,
-            "root_category": None,
-            "root_keywords": [],
-            "root_industry": None,
-        }
 
-async def infer_category(self, url: str):
-    """
-    Scrape the root company and retrieve industry + keywords + LLM-suggested category.
-    DOES NOT overwrite the user-selected root_category.
-    """
-
-    text = await self.scrape_website(url)
-
-    prompt = f"""
-    Analyze the company described below and return JSON with fields:
-    - industry: High-level industry, e.g. "Financial Technology"
-    - category: Suggested category (advisory only)
-    - keywords: List of relevant product/market keywords
-
-    COMPANY TEXT:
-    {text}
-
-    Return JSON only.
-    """
-
-    llm_response = await self.llm.call_llm(prompt)
-
-    if not llm_response.json:
-        raise RuntimeError("Invalid JSON returned by LLM in /infer_category")
-
-    industry = llm_response.json.get("industry")
-    category_suggested = llm_response.json.get("category")
-    keywords = llm_response.json.get("keywords", [])
-
-    # Update backend state — note: root_category is NOT touched here
-    STATE["root_company"] = url
-    STATE["root_industry"] = industry
-    STATE["root_keywords"] = keywords
-
-    return {
-        "root_company": url,
-        "root_category": STATE["root_category"],           # the UI-selected category (unchanged)
-        "llm_suggested_category": category_suggested,     # advisory only
-        "root_industry": industry,
-        "root_keywords": keywords,
-    }
+    async def scrape_website(self, url: str) -> str:
         """
-        Extract industry, category, and keywords for the primary company.
-        Updates backend STATE.
+        Downloads the page and extracts visible text.
         """
-
-        prompt = f"""
-        Analyze this company based on its website: {url}
-
-        Return ONLY JSON in the format:
-        {{
-            "industry": "...",
-            "category": "...",
-            "keywords": ["...", "..."]
-        }}
-        """
-
-        result = await self.llm.call_llm(prompt)
-
-        if not result.json:
-            raise RuntimeError("Invalid LLM JSON response for category inference.")
-
-        data = result.json
-
-        # Update backend memory state
-        self.STATE["root_company"] = url
-        self.STATE["root_category"] = data.get("category")
-        self.STATE["root_industry"] = data.get("industry")
-        self.STATE["root_keywords"] = data.get("keywords", [])
-
-        return data
-
-    async def validate_company(self, company_url: str) -> dict:
-        """
-        Validate if a manually added company belongs to the same category.
-        Strict Option-A logic:
-        - Only companies in the same inferred category are allowed.
-        """
-
-        category = self.STATE["root_category"]
-        if not category:
-            return {
-                "allowed": False,
-                "reason": "Primary company category not set. Run /infer_category first."
-            }
-
-        prompt = f"""
-        The ROOT CATEGORY is: {category}.
-        Evaluate whether the company at URL {company_url}
-        offers any major product in this category.
-
-        Return ONLY JSON:
-        {{
-            "allowed": true/false,
-            "reason": "..."
-        }}
-        """
-
-        result = await self.llm.call_llm(prompt)
-
-        if not result.json:
-            raise RuntimeError("Invalid LLM JSON for company validation.")
-
-        return result.json
-
-    async def analyze_competitor(self, url: str) -> dict:
-        """
-        Generates a full competitor battlecard in JSON format.
-        """
-
-        prompt = f"""
-        Analyze the competitor at URL: {url}
-
-        Return ONLY JSON:
-        {{
-            "name": "...",
-            "url": "{url}",
-            "product_summary": "...",
-            "target_users": "...",
-            "key_features": ["...", "..."],
-            "strengths": ["..."],
-            "weaknesses": ["..."],
-            "ai_usage": "...",
-            "differentiators": ["...", "..."]
-        }}
-        """
-
-        result = await self.llm.call_llm(prompt)
-
-        if not result.json:
-            raise RuntimeError("Invalid LLM JSON for competitor analysis.")
-
-        return result.json
-
-    async def validate_company(self, url: str):
-        """
-        Scrape company page -> summarize -> validate category match using LLM.
-        """
-        root_cat = self.state.get("root_category")
-        if not root_cat:
-            raise RuntimeError("Root category not set. Run /infer_category first.")
-
-        # SCRAPE
         try:
-            r = httpx.get(url, timeout=10)
-            text = r.text
-        except Exception:
-            text = ""
+            async with httpx.AsyncClient(timeout=20) as client:
+                resp = await client.get(url)
+                resp.raise_for_status()
+        except Exception as e:
+            raise RuntimeError(f"Failed to scrape website: {e}")
 
-        # Summarize content for validation
-        snippet = text[:2000] if text else f"Website not accessible: {url}"
+        soup = BeautifulSoup(resp.text, "html.parser")
+        text = soup.get_text(separator=" ", strip=True)
+        return text[:6000]  # LLM-safe chunk
 
-        # Build validation prompt
+    async def infer_category(self, url: str):
+        """
+        Scrape the root company and retrieve:
+        - industry
+        - keywords
+        - LLM-suggested category (advisory only)
+
+        DOES NOT overwrite root_category (UI-owned).
+        """
+
+        text = await self.scrape_website(url)
+
         prompt = f"""
-You are a category validator.
+        Analyze the company described below and return JSON with fields:
+        - industry: High-level industry, e.g. "Financial Technology"
+        - category: Suggested category (advisory only)
+        - keywords: List of relevant product/market keywords
 
-ROOT CATEGORY: {root_cat}
+        COMPANY TEXT:
+        {text}
 
-COMPANY TEXT:
-{snippet}
+        Return JSON only.
+        """
 
-Determine if this company belongs to the ROOT CATEGORY.
+        llm_response = await self.llm.call_llm(prompt)
 
-Return ONLY JSON:
-{{
-  "allowed": true/false,
-  "reason": "very short explanation"
-}}
-"""
+        if not llm_response.json:
+            raise RuntimeError("Invalid JSON returned by LLM in /infer_category")
 
-        llm_result = await self.llm.call_llm(prompt)
+        industry = llm_response.json.get("industry")
+        category_suggested = llm_response.json.get("category")
+        keywords = llm_response.json.get("keywords", [])
 
-        if not llm_result.json:
-            raise RuntimeError("Invalid LLM JSON response for competitor validation.")
+        # Update backend state — DO NOT touch root_category
+        STATE["root_company"] = url
+        STATE["root_industry"] = industry
+        STATE["root_keywords"] = keywords
 
-        return llm_result.json
+        return {
+            "root_company": url,
+            "root_category": STATE["root_category"],   # user-chosen category
+            "llm_suggested_category": category_sugges_
